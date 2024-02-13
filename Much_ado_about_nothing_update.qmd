@@ -1,0 +1,649 @@
+---
+title: "Much Ado About Nothing"
+title-slide-attributes:
+  data-background-image: /Shakespeare.png
+  data-background-position: 50% 50%
+  data-background-size: contain
+  data-background-opacity: ".6"
+author: "Rhys Maredudd Davies"
+format:
+  revealjs:
+    theme: simple
+    transition: slide
+editor: visual
+execute:
+  echo: false
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(123)
+library(tidyverse) # For data manipulation and piping 
+library(gtsummary) # to present fancy tables
+library(naniar)    # Missing data visualisation, tools, and tests
+library(simputation) # Simple imputation tools
+library(mice)      # Multiple imputed chained equations - needed for one of best practice methods
+library(missMethods) # for artificially creating missing data for simulation/demonstration purposes
+library(gridExtra) # for viewing plots side by side
+```
+
+## If it's not there, what's the problem?
+
+- It is almost always present in our collected data.
+- Missing data can be good! It shows your participants are human.
+- Removing missing data can bias our analysis more imputing.
+- Removing missing data can also decimate our sample/power. 
+
+## Benefits of understanding missing data
+
+- Deliberate missing data designs can be used to reduce cognitive load/risk exposure for participants.
+- Deliberate missing data designs can also save costs for researchers.
+- Understanding missing data can also open up new research methods - i.e., Testing hypotheses of why participants drop out of research.
+- Be better equipped for critically evaluating research.
+- Understand why population-mean imputation is a terrible idea.
+
+## CONTENT WARNING
+
+- Today's presentation will include **both** *summary statistics* and *regression tables*.
+- For non-nerds, *plots* will be used so that we can **visualise** and **compare** the impact of **missing data** and **imputations**.
+- Understanding the visual impact may **enhance your understanding** of quantitative research methods.
+- Questions are **permitted** and **encouraged**. ;)
+
+## Confession space
+
+- Who has ever had to cope with missing data?
+- Who has abandoned an analysis method due to missing data?
+- Who has removed data because it was missing because it was the easy thing to?
+- Who is looking for something in their lives/data that's missing? 
+
+## Types of missing data
+
+- Missing Completely At Random (MCAR)
+- Missing At Random (MAR)
+- Missing not at Random (MNAR)
+
+## What does this mean in context? (Game time)
+
+Understanding missing data, and imputation can be metaphorically achieved with a *"fill the gap"* game.
+
+The more context and prior knowledge of Shakespeare you have, the easier this will be. 
+
+* “O Romeo, Romeo, wherefore art … Romeo?”
+* “To … or not … … ; that is … …”
+* “A …! A …! My kingdom for a …!”
+* “ … … your …, … face,… Chieftain … the …!” 
+
+## What does this mean in context? (Answer time)
+
+Understanding missing data, and imputation can be metaphorically achieved with a *"fill the gap"* game.
+
+The more context and prior knowledge of Shakespeare you have, the easier this will be. 
+
+* “O Romeo, Romeo, wherefore art *thou* Romeo?”
+* “To *be* or not *to be* ; that is *the question*”
+* “A *horse*! A *horse*! My kingdom for a *horse*!”
+* “ *Fair fa'* your *honest*, *sonsie* face, *great* Chieftain *o'* the *Puddin-race*!” (Some *Rabbie Burns* to simulate **MNAR**).
+
+## Enough qualitative meandering, show me the data! 
+
+* To help get our heads around missing data today, we are going to work with different scenario's of simulated missing conditions (which sounds like a Star Trek horror spin off...). 
+
+* But we're going to make it nice and easy, and nowhere near as scary.
+
+
+## The full picture/data
+
+* Our nominated dataset for today is **iris**. Let's have a look at before we start taking chunks of data out for our simulations. 
+
+
+* As the association between `Petal.Width` and `Petal.Length` is so striking, we will focus on these variables for the workshop. 
+
+
+* Notice also that there are no NA's present. This makes it perfect for us to simulate and compare across the different missing categories.
+
+
+## Dive into the data
+::: {.panel-tabset}
+
+### Iris Summary
+```{r, echo =FALSE}
+original_summary <- iris %>% tbl_summary( statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+original_summary
+```
+
+### Iris Regression results
+```{r, echo =FALSE}
+model_complete <- lm(Petal.Length ~ Petal.Width, iris) #establishing regression table
+
+Original_model <- tbl_regression(model_complete)  %>%  #creating easy to interpret regression output using gtsummary functions. 
+  modify_column_unhide(column = std.error)  %>%
+  add_glance_table(include = c(r.squared, adj.r.squared, 
+                               statistic, df.residual, p.value))
+
+Original_model
+```
+
+### Iris Plot
+```{r, echo =FALSE}
+vis_complete <- ggplot(iris, aes(x = Petal.Width, y = Petal.Length)) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "grey", alpha = .5) +
+  geom_point(aes(color = Species), alpha = .7)+
+  theme(legend.position = "bottom") +
+  labs(title = "Complete original data - no missing values")
+
+vis_complete
+```
+
+:::
+
+## MCAR Data
+
+For this next example, data will be missing completley at random. We have deliberately removed 30% of entries from `Petal.Width` variable. 
+
+Now lets see what happens when we apply different missing data approaches to it.
+
+## MCAR 
+
+::: {.panel-tabset}
+
+### MCAR summary
+```{r, echo = FALSE}
+MCAR_iris <- delete_MCAR(iris, cols_mis = "Petal.Length", .3) %>% bind_shadow() %>% # here we have asked data to be missing in the `Petal.Length` variable, and for 30% of data to be missing in a MCAR condition. 
+  mutate(Petal.Length_NA = as.factor(case_when(
+    Petal.Length_NA == "!NA" ~ "Non-imputed data",
+    Petal.Length_NA == "NA" ~ "Imputed/Missing data"))
+  )
+  
+  
+MCAR_summary <- MCAR_iris %>% 
+  dplyr::select(`Sepal.Length`, `Sepal.Width`, `Petal.Length`, `Petal.Width`, `Species`) %>% # selecting to avoid summaries of shadow variables.
+  tbl_summary( statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+tbl_merge(tbls = list(original_summary, MCAR_summary), 
+          tab_spanner = c("Original", "MCAR")) # using to compare summaries of original and missing data.
+
+```
+
+### MCAR Regression
+
+```{r, echo= FALSE}
+model_MCAR <- lm(Petal.Length ~ Petal.Width, MCAR_iris) # Establishing model
+
+# This next bit of code uses the gtsummary functions. It's very cool in creating quick tables, and definetly worth exploring in your own time. But for today their purpose is to allow us to quickly compare regression outputs
+
+
+
+MCAR <- tbl_regression(model_MCAR) %>% 
+  modify_column_unhide(column = std.error) %>% 
+  add_glance_table(include = c(r.squared, adj.r.squared, 
+                               statistic, df.residual, p.value))
+
+tbl_merge(tbls = list(Original_model, MCAR),
+          tab_spanner = c("Original", "MCAR")) 
+
+```
+
+### MCAR Plot
+
+```{r, echo= FALSE}
+vis_MCAR <- ggplot(MCAR_iris, aes(x = Petal.Width, y = Petal.Length, color = Petal.Length_NA)) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "grey", alpha = .5) +
+  geom_point(alpha = .7)+
+  geom_miss_point() + # using grid_miss_point() from earlier to view difference
+  theme(legend.position = "bottom") +
+  labs(title = "MCAR missing values at Petal.Length")
+
+grid.arrange(vis_MCAR, vis_complete) # Using grid.arrange() to compare plots, lets see the difference between a full data, and MCAR data
+```
+
+:::
+
+## List-wise deletion
+
+::: {.panel-tabset}
+
+### List-wise del: summary
+```{r, echo = FALSE}
+# Here we use the na.omit() function to remove our missing data
+delete_MCAR <- MCAR_iris %>% na.omit()
+
+MCAR_del_summary <- delete_MCAR %>% 
+  dplyr::select(`Sepal.Length`, `Sepal.Width`, `Petal.Length`, `Petal.Width`, `Species`) %>% # selecting to avoid summaries of shadow variables.
+  tbl_summary( statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+tbl_merge(tbls = list(original_summary, MCAR_summary, MCAR_del_summary), 
+          tab_spanner = c("Original", "MCAR", "List-wise deletion")) # using to compare summaries of original and missing data.
+```
+
+### List-wise del: Regression
+
+```{r, echo = FALSE}
+model_MCAR_del <- lm(Petal.Length ~ Petal.Width, delete_MCAR) # Establishing model
+
+
+
+
+MCAR_del <- tbl_regression(model_MCAR_del) %>% 
+  modify_column_unhide(column = std.error) %>% 
+  add_glance_table(include = c(r.squared, adj.r.squared, 
+                               statistic, df.residual, p.value))
+
+tbl_merge(tbls = list(Original_model, MCAR, MCAR_del),
+          tab_spanner = c("Original", "MCAR", "List-wise deletion")) 
+
+```
+
+
+### List-wise del: Visualisation
+
+```{r, echo = FALSE}
+vis_MCAR_delete <- ggplot(delete_MCAR, aes(x = Petal.Width, y = Petal.Length)) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "grey", alpha = .5) +
+  geom_point(aes(color = Petal.Length_NA), alpha =.7)+
+  theme(legend.position = "bottom") +
+  labs(title = "MCAR list-wise deletion")
+
+grid.arrange(vis_MCAR_delete, vis_complete) # Using grid.arrange() to compare plots, lets see the difference between a full data, and MCAR data
+
+```
+
+:::
+
+## Mean imputation.
+::: {.panel-tabset}
+
+### Mean-imp: Summary
+```{r, echo = FALSE}
+
+# Here we use the impute_mean() function to impute the mean values to our Petal.Length variable. 
+
+mean_imp_MCAR <- MCAR_iris %>% impute_mean()
+
+MCAR_mean_imp_summary <- mean_imp_MCAR %>% 
+  dplyr::select(`Sepal.Length`, `Sepal.Width`, `Petal.Length`, `Petal.Width`, `Species`) %>% # selecting to avoid summaries of shadow variables.
+  tbl_summary( statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+tbl_merge(tbls = list(original_summary, MCAR_summary, MCAR_del_summary, MCAR_mean_imp_summary), 
+          tab_spanner = c("Original", "MCAR", "MCAR Pair-wise Deletion", "MCAR mean imputed")) # using to compare summaries of original and missing data.
+```
+
+### Mean-imp: Regression
+```{r, echo=FALSE}
+model_MCAR_imp <- lm(Petal.Length ~ Petal.Width, mean_imp_MCAR) # Establishing model
+
+
+MCAR_mean_imp <- tbl_regression(model_MCAR_imp) %>% 
+  modify_column_unhide(column = std.error) %>% 
+  add_glance_table(include = c(r.squared, adj.r.squared, 
+                               statistic, df.residual, p.value))
+
+tbl_merge(tbls = list(Original_model, MCAR , MCAR_del, MCAR_mean_imp),
+          tab_spanner = c("Original", "MCAR" , "MCAR Pair-wise Deletion", "MCAR mean imputation")) 
+
+```
+
+### Mean-imp: visualisation
+```{r, echo=FALSE}
+vis_mean_imp <- ggplot(mean_imp_MCAR, aes(x = Petal.Width, y = Petal.Length)) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "grey", alpha = .5) +
+  geom_point(aes(color = Petal.Length_NA), alpha =.7)+
+  theme(legend.position = "bottom") +
+  labs(title = "MCAR missing values at Petal.Length imputed via Mean")
+
+grid.arrange(vis_mean_imp, vis_complete) # Using grid.arrange() to compare plots, lets see the difference between a full data, and MCAR data
+```
+
+:::
+
+## Predictive Mean Matching (PMM) 
+
+* Now we will work through modern recommended approaches of missing data imputation. 
+* [PMM](https://en.wikipedia.org/wiki/Predictive_mean_matching) is a type of imputation used in the Multiple Imputed Chained Equations method of imputing data.
+* PMM will impute by drawing from real values from the dataset. 
+* It is robust, easy(er) to use, and can reduce bias compared to other imputation methods (Van Buuren & Groothuis-Oudshoorn, 2011).
+
+
+## Predictive Mean Matching (PMM) 
+
+For more information, here are some useful sources:
+
+* Guide on [MICE package](https://www.rdocumentation.org/packages/mice/versions/3.16.0/topics/mice) in R.
+* [Applied missing data](https://www.appliedmissingdata.com/) is a great textbook and online resource.
+* Overview of [PMM imputation](https://stefvanbuuren.name/fimd/sec-pmm.html).
+* PMM is a great general tool for imputing. But for Likert data, methods such as random forest (`rf`) may be more appropriate [(Wu et al., 2015)](https://www.tandfonline.com/doi/pdf/10.1080/00273171.2015.1022644). 
+
+## PMM
+
+::: {.panel-tabset}
+
+```{r, message= FALSE, warning= FALSE, results='hide'}
+pmm_MCAR <- mice(MCAR_iris, method = "pmm",
+                 pred = quickpred(MCAR_iris, mincor = .3),
+                 m =5, maxit = 5, seed = 123, print = FALSE)
+pmm_MCAR_complete <- complete(pmm_MCAR, 5) # Please note this is a simplified approach, and that best practice requires pool and testing against a model. However, as a demonstration it is still effective.
+```
+
+### PMM: Summary
+
+```{r, echo =FALSE}
+MCAR_pmm_imp_summary <- pmm_MCAR_complete %>% 
+  dplyr::select(`Sepal.Length`, `Sepal.Width`, `Petal.Length`, `Petal.Width`, `Species`) %>% # selecting to avoid summaries of shadow variables.
+  tbl_summary( statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+tbl_merge(tbls = list(original_summary, MCAR_summary, MCAR_del_summary,  MCAR_mean_imp_summary, MCAR_pmm_imp_summary), 
+          tab_spanner = c("Original", "MCAR", "MCAR Pair-wise Deletion", "MCAR mean imputed", "MCAR pmm imputed")) # using to compare summaries of original and missing data.
+```
+
+### PMM: Regression
+
+```{r, echo = FALSE}
+model_MCAR_pmm_imp <- lm(Petal.Length ~ Petal.Width, pmm_MCAR_complete) # Establishing model
+
+
+
+
+MCAR_pmmm_imp <- tbl_regression(model_MCAR_pmm_imp) %>% 
+  modify_column_unhide(column = std.error) %>% 
+  add_glance_table(include = c(r.squared, adj.r.squared, 
+                               statistic, df.residual, p.value))
+
+tbl_merge(tbls = list(Original_model, MCAR, MCAR_del,
+                      MCAR_mean_imp,  MCAR_pmmm_imp),
+          tab_spanner = c("Original", "MCAR", "MCAR Pair-wise Deletion",
+                          "MCAR mean imputation",  
+                          "MCAR predictive mean matching imputation")) 
+
+```
+
+### PMM: Visualisation
+
+```{r, echo=FALSE}
+vis_pmm_imp <- ggplot(pmm_MCAR_complete, aes(x = Petal.Width, y = Petal.Length)) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "grey", alpha = .5) +
+  geom_point(aes(color = Petal.Length_NA), alpha = .7)+
+  theme(legend.position = "bottom") +
+  labs(title = "MCAR missing values at Petal.Length imputed via pmm")
+
+grid.arrange(vis_pmm_imp, vis_complete) # Using grid.arrange() to compare plots, lets see the difference between a full data, and MCAR data
+```
+
+:::
+
+## Missing at Random
+
+* Now to examine our missing data under conditions where there is a reason for missing data. 
+
+* Let's imagine that the researcher of this simulated dataset had poor eyesight, had lost their glasses, and so failed to measure the smaller `Petal.Length` values. 
+
+* (Imagine hard, and pretend that this was not an issue for the `Sepal.Length` variable. A different researcher was collecting this data).
+
+* Once again, we have simulated 30% of the data to be missing.
+
+## MAR 
+::: {.panel-tabset}
+
+### MAR summary
+
+```{r, error = FALSE, echo = FALSE}
+MAR_iris <- delete_MAR_censoring(iris, cols_mis = "Petal.Length", cols_ctrl = "Sepal.Length", .3) %>% bind_shadow() %>% # here we have asked data to be missing in the `Petal.Length` variable, and for 30% of data to be missing in a MAR condition. 
+  mutate(Petal.Length_NA = as.factor(case_when(
+    Petal.Length_NA == "!NA" ~ "Non-imputed data",
+    Petal.Length_NA == "NA" ~ "Imputed/Missing data"))
+  )
+  
+  
+  
+MAR_summary <- MAR_iris %>% 
+  dplyr::select(`Sepal.Length`, `Sepal.Width`, `Petal.Length`, `Petal.Width`, `Species`) %>% # selecting to avoid summaries of shadow variables.
+  tbl_summary( statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+tbl_merge(tbls = list(original_summary, MCAR_summary, MAR_summary), 
+          tab_spanner = c("Original", "MCAR","MAR")) # using to compare summaries of original and missing data.
+```
+
+### MAR: Regression
+
+```{r, echo = FALSE}
+model_MAR <- lm(Petal.Length ~ Petal.Width, MAR_iris) # Establishing model
+
+# This next bit of code uses the gtsummary functions. It's very cool in creating quick tables, and definetly worth exploring in your own time. But for today their purpose is to allow us to quickly compare regression outputs
+
+
+
+MAR <- tbl_regression(model_MAR) %>% 
+  modify_column_unhide(column = std.error) %>% 
+  add_glance_table(include = c(r.squared, adj.r.squared, 
+                               statistic, df.residual, p.value))
+
+tbl_merge(tbls = list(Original_model, MCAR, MAR),
+          tab_spanner = c("Original", "MCAR" ,"MAR")) 
+
+```
+
+### MAR: Visualisation
+
+```{r, echo = FALSE}
+vis_MAR <- ggplot(MAR_iris, aes(x = Petal.Width, y = Petal.Length, color = Petal.Length_NA)) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "grey", alpha = .5) +
+  geom_point(alpha =.7)+
+  geom_miss_point() + # using grid_miss_point() from earlier to view difference
+  theme(legend.position = "bottom") +
+  labs(title = "MAR missing values at Petal.Length")
+
+grid.arrange(vis_MAR,vis_MCAR) # Using grid.arrange() to compare plots, lets see the difference between a MAR data and MCAR data.
+
+```
+
+:::
+
+## MAR List-wise Deletion
+
+::: {.panel-tabset}
+### List-wise Del: Summary
+ 
+```{r, echo = FALSE}
+# Here we use the na.omit() function to remove our missing data
+delete_MAR <- MAR_iris %>% na.omit()
+
+MAR_del_summary <- delete_MAR %>% 
+  dplyr::select(`Sepal.Length`, `Sepal.Width`, `Petal.Length`, `Petal.Width`, `Species`) %>% # selecting to avoid summaries of shadow variables.
+  tbl_summary( statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+tbl_merge(tbls = list(original_summary, MAR_summary, MAR_del_summary), 
+          tab_spanner = c("Original", "MAR", "MAR list-wise deletion")) # using to compare summaries of original and missing data.
+```
+
+### List-wise Del: Regression
+
+```{r, echo = FALSE}
+model_MAR_del <- lm(Petal.Length ~ Petal.Width, delete_MAR) # Establishing model
+
+
+MAR_del <- tbl_regression(model_MAR_del) %>% 
+  modify_column_unhide(column = std.error) %>% 
+  add_glance_table(include = c(r.squared, adj.r.squared, 
+                               statistic, df.residual, p.value))
+
+tbl_merge(tbls = list(Original_model, MAR, MAR_del),
+          tab_spanner = c("Original", "MAR", "MAR list-wise deletion")) 
+
+```
+
+### List-wise Del: Visualisation
+
+```{r, echo = FALSE}
+vis_MAR_delete <- ggplot(delete_MAR, aes(x = Petal.Width, y = Petal.Length )) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "grey", alpha = .5) +
+  geom_point(aes(color = Petal.Length_NA), alpha =.7)+
+  theme(legend.position = "bottom") +
+  labs(title = "MAR missing values at Petal.Length")
+
+grid.arrange(vis_MAR_delete, vis_complete) # Using grid.arrange() to compare plots, lets see the difference between a full data, and MCAR data
+```
+
+:::
+
+
+## MAR Mean imputation
+
+::: {.panel-tabset}
+### Mean imp: Summary
+
+```{r, echo =FALSE}
+
+# Here we use the impute_mean() function to impute the mean values to our Petal.Length variable. 
+
+mean_imp_MAR <- MAR_iris %>% impute_mean()
+
+MAR_mean_imp_summary <- mean_imp_MAR %>% 
+  dplyr::select(`Sepal.Length`, `Sepal.Width`, `Petal.Length`, `Petal.Width`, `Species`) %>% # selecting to avoid summaries of shadow variables.
+  tbl_summary( statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+tbl_merge(tbls = list(original_summary, MAR_summary, MAR_del_summary, MAR_mean_imp_summary), 
+          tab_spanner = c("Original", "MAR", "MAR deleted missing", "MAR mean imputed")) # using to compare summaries of original and missing data.
+```
+
+### Mean Imp: Regression
+
+```{r, echo=FALSE}
+model_MAR_imp <- lm(Petal.Length ~ Petal.Width, mean_imp_MAR) # Establishing model
+
+
+MAR_mean_imp <- tbl_regression(model_MAR_imp) %>% 
+  modify_column_unhide(column = std.error) %>% 
+  add_glance_table(include = c(r.squared, adj.r.squared, 
+                               statistic, df.residual, p.value))
+
+tbl_merge(tbls = list(Original_model, MAR, MAR_del, MAR_mean_imp),
+          tab_spanner = c("Original", "MAR", "MAR missing deleted", "MAR mean imputation")) 
+
+```
+
+### Mean Imp: Visualisation
+
+```{r, echo=FALSE}
+vis_mean_imp <- ggplot(mean_imp_MAR, aes(x = Petal.Width, y = Petal.Length)) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "grey", alpha = .5) +
+  geom_point(aes(color = Petal.Length_NA), alpha =.7)+
+  theme(legend.position = "bottom") +
+  labs(title = "MAR missing values at Petal.Length imputed via Mean")
+
+grid.arrange(vis_mean_imp, vis_complete) # Using grid.arrange() to compare plots, lets see the difference between a full data, and MCAR data
+
+
+```
+
+:::
+
+
+## PMM - predicitive mean matching
+
+::: {.panel-tabset}
+```{r, echo =FALSE , message= FALSE, warning= FALSE, results='hide'}
+pmm_MAR <- mice(MAR_iris, method = "pmm",
+                pred = quickpred(MAR_iris, mincor = .3),
+                m =5, maxit = 5, seed = 123, print = FALSE)
+pmm_MAR_complete <- complete(pmm_MAR, 5) # Please note this is a simplified approach, and that best practice requires pool and testing against a model. However, as a demonstration it is still effective.
+```
+
+### PMM: summary
+```{r, echo = FALSE}
+MAR_pmm_imp_summary <- pmm_MAR_complete %>% 
+  dplyr::select(`Sepal.Length`, `Sepal.Width`, `Petal.Length`, `Petal.Width`, `Species`) %>% # selecting to avoid summaries of shadow variables.
+  tbl_summary( statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ))
+
+tbl_merge(tbls = list(original_summary, MAR_summary, MAR_del_summary, MAR_mean_imp_summary, MAR_pmm_imp_summary), 
+          tab_spanner = c("Original", "MAR", "MAR deleted missing", "MAR mean imputed",  "MAR pmm imputed")) # using to compare summaries of original and missing data.
+```
+
+### PMM: Regression
+
+```{r, echo = FALSE}
+model_MAR_pmm_imp <- lm(Petal.Length ~ Petal.Width, pmm_MAR_complete) # Establishing model
+
+MAR_pmm_imp <- tbl_regression(model_MAR_pmm_imp) %>% 
+  modify_column_unhide(column = std.error) %>% 
+  add_glance_table(include = c(r.squared, adj.r.squared, 
+                               statistic, df.residual, p.value))
+
+tbl_merge(tbls = list(Original_model, MAR, MAR_del, MAR_mean_imp, MAR_pmm_imp),
+          tab_spanner = c("Original", "MAR", "MAR missing deleted", "MAR mean imputation",  "MAR predictive mean matching imputation")) 
+
+```
+
+### PMM: Visualisation
+
+```{r, echo = FALSE}
+vis_pmm_imp <- ggplot(pmm_MAR_complete, aes(x = Petal.Width, y = Petal.Length)) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "grey", alpha = .5) +
+  geom_point(aes(color = Petal.Length_NA), alpha =.7)+
+  theme(legend.position = "bottom") +
+  labs(title = "MAR missing values at Petal.Length imputed via pmm")
+
+grid.arrange(vis_pmm_imp, vis_complete) # Using grid.arrange() to compare plots, lets see the difference between a full data, and MCAR data
+
+```
+
+:::
+
+## Missing not at Random : MNAR
+
+* MNAR is a weird world. 
+* MNAR happens when data is missing for a reason, but you haven't measured this reason. 
+* This can make it very difficult to work with, and there are no easy solutions for MNAR. 
+
+## Working with MNAR data
+
+But there are steps you can take to reduce the likelihood of having MNAR in your data:
+
+* Including supplementary variables that explain missing data for your key analysis variables (Enders, 2022).
+* These variables do not need to be in your analysis, but they need to be used for imputation (Enders, 2022).
+* So think very carefully when planning data collection. These supplementary variables are essential for ensuring reliable and accurate analysis. 
+
+## Summary:
+
+* Make sure to understand why data is missing.
+* Critically evaluate papers on treatment of missing data.
+* Hope for the best, prepare for the MNAR.
+* Pair-wise deletion can be appropriate for MCAR.
+* Under MAR, removing missing data will bias results.
+* List-wise deletion will bias results and reduce sample size.
+* With PMM, imputation can be applied regardless of MCAR/MAR.
+* Always **avoid** population-mean imputation...
+
+## References
+
+*Enders, C. K. (2022). Applied missing data analysis. Guilford Publications.*
+
+*Van Buuren, S., & Groothuis-Oudshoorn, K. (2011). mice: Multivariate imputation by chained equations in R. Journal of statistical software, 45, 1-67.*
+
+*Wu, W., Jia, F., & Enders, C. (2015). A comparison of imputation strategies for ordinal missing data on Likert scale variables. Multivariate behavioral research, 50(5), 484-503.*
